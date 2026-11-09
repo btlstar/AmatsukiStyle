@@ -1,0 +1,7 @@
+AmatsukiStyle
+Copyright 2026 AmatsukiStyle contributors.
+
+Original local cosmetic adapter and installation-catalog reader, Apache-2.0.
+External dependencies: Frida Python bindings (wxWindows Library Licence 3.1)
+and UnityPy (MIT); their licenses remain applicable.
+Game clients, game assets and account data are not included in this source.
