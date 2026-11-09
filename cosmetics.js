@@ -104,6 +104,14 @@ class AmatsukiPolicy {
     }
     return r;
   }
+  characterLookup(id, original) {
+    if(!this.roles.has(id))return structuredClone(original);
+    const rejected=original.status===1&&original.errorCode===1;
+    if(original.status!==0&&!rejected)return structuredClone(original);
+    const response=rejected?{...original,...this.applyResponse(),message:null}:this.overlay('ApplyItemSetResponse',original);
+    response.characterList=response.characterList.filter(x=>x.itemId===id);
+    return response;
+  }
   followLobby() {
     const role=this.using().find(x=>this.types.get(x)===6);
     const skin=this.using().find(x=>this.types.get(x)===7);

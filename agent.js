@@ -8,7 +8,7 @@ const localOperations=new Set([
   'InventorySetItemUsing','InventorySwitchCustomGroupRandom','InventorySaveCustomGroup','InventorySaveEmojiGroup','InventoryApplyCustomGroup','InventoryApplyEmojiGroup','InventorySaveCurrentItemSet',
   'InventorySaveLobbySet','InventorySaveLobbySetRandom','InventoryDeleteLobbySet','ProfileUpdateUsingFrame','ProfileUpdateUsingTitle','ProfileUpdateUsingProfileFrame','ProfileUpdateUsingProfileBg'
 ]);
-const readOperations=new Set(['CharacterGetOwnedSkin','InventoryGetByType','InventoryGetByIds','InventoryGetList','InventoryGetEmojiGroupList','InventoryGetCustomGroupList','InventoryGetLobbySetList']);
+const readOperations=new Set(['CharacterGetById','CharacterGetOwnedSkin','InventoryGetByType','InventoryGetByIds','InventoryGetList','InventoryGetEmojiGroupList','InventoryGetCustomGroupList','InventoryGetLobbySetList']);
 function verifyReferences(){
   const lobby=IL.fromJson('DataModel.ClientLobbySetItem',{setIndex:0,name:'before',lobbyBgItemId:1100000,lobbyBgmItemId:1180000,lobbyCharacterSkinId:1070100,scale:1,locationX:0,locationY:0});
   IL.write(lobby,'name',IL.managedString('after'));IL.write(lobby,'setIndex',1);
@@ -163,7 +163,8 @@ function watchResponses(){
       else if(eligible.has(name)){
         if(name==='InventoryResponse' && !['InventoryGetByType','InventoryGetByIds','InventoryGetList'].includes(job?.operation))return;
         const context=job?.operation==='InventoryGetByType'?{itemType:job.args[0]}:job?.operation==='InventoryGetByIds'?{itemIds:job.args[0]}:{};
-        data=policy.overlay(name,data,context);
+        data=name==='ApplyItemSetResponse'&&job?.operation==='CharacterGetById'
+          ?policy.characterLookup(job.args[0],data):policy.overlay(name,data,context);
       }
       const type=IL.typeName(IL.api.classType(klass));
       result.replace(quiet(()=>IL.fromJson(type,data)));stats.responses++;

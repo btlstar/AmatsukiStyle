@@ -49,3 +49,22 @@ test('room and match overlays change only own cosmetics',()=>{
  assert.equal(value.players[0].rankExp,123);assert.equal(value.players[0].favorabilityLevel,3);
  assert.deepEqual(value.players[1],other);assert.equal(own.skinId,1070100);
 });
+
+
+test('unowned character lookup uses the requested local appearance after server input rejection',()=>{
+ const p=new Policy(catalog,{},seed);p.operation('CharacterSetSkin',[1060001,1070103]);
+ const response=p.characterLookup(1060001,{status:1,errorCode:1,message:'input error',characterList:[]});
+ assert.equal(response.status,0);assert.equal(response.errorCode,0);assert.equal(response.message,null);
+ assert.equal(response.characterList.length,1);assert.equal(response.characterList[0].itemId,1060001);assert.equal(response.characterList[0].skinId,1070103);
+});
+test('character lookup preserves actual progression and narrows the response to the requested role',()=>{
+ const p=new Policy(catalog,{},seed);
+ const response=p.characterLookup(1060002,{status:0,errorCode:0,characterList:[{itemId:1060002,skinId:1070200,favorabilityLevel:4,awakenLevel:2}],usingItemId:seed.usingItemId});
+ assert.equal(response.characterList.length,1);assert.equal(response.characterList[0].itemId,1060002);
+ assert.equal(response.characterList[0].favorabilityLevel,4);assert.equal(response.characterList[0].awakenLevel,2);
+});
+test('character lookup retains authentication and network failures and invalid IDs',()=>{
+ const p=new Policy(catalog,{},seed);
+ for(const errorCode of [3,4,19,70]){const failure={status:1,errorCode,message:'real error',characterList:[]};assert.deepEqual(p.characterLookup(1060001,failure),failure);}
+ const invalid={status:1,errorCode:1,characterList:[]};assert.deepEqual(p.characterLookup(9999999,invalid),invalid);
+});
