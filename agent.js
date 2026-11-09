@@ -2,7 +2,7 @@
 let catalog,profiles={},policy,account,uid;
 let suppress=0;
 const hooks=[], hookedMoves=new Set(), jobs=new Map(), scopes=new Map();
-const stats={operations:0,responses:0,errors:0};
+const stats={operations:0,responses:0,errors:0,responseTypes:{},views:{}};
 const localOperations=new Set([
   'CharacterSetUsing','CharacterSetSkin','CharacterFavorite','CharacterUnfavorite','CharacterSetVoiceVariant','CharacterSetCutinVariant',
   'InventorySetItemUsing','InventorySwitchCustomGroupRandom','InventorySaveCustomGroup','InventorySaveEmojiGroup','InventoryApplyCustomGroup','InventoryApplyEmojiGroup','InventorySaveCurrentItemSet',
@@ -106,45 +106,120 @@ function watchFactory(m){
     }
   }));
 }
-function ownDisplay(value){
-  if(Array.isArray(value)){value.forEach(ownDisplay);return;}
-  if(!value||typeof value!=='object')return;
-  if(String(value.uid)===uid){
-    const using=policy.using(),skin=using.find(x=>policy.types.get(x)===7),role=using.find(x=>policy.types.get(x)===6);
-    if('usingItemId' in value)value.usingItemId=using;
-    if('skinId' in value&&skin)value.skinId=skin;
-    if('headItemId' in value&&role&&[6,7].includes(policy.types.get(value.headItemId)))value.headItemId=role;
-    for(const [type,field] of [[8,'frameId'],[9,'titleId'],[26,'profileFrameId'],[27,'profileBgId']]){const id=using.find(x=>policy.types.get(x)===type);if(field in value&&id)value[field]=id;}
-    if('usingItems' in value&&value.usingItems){const user=IL.staticRead('Gvar','userInfo');value.usingItems=quiet(()=>IL.json(IL.read(user,'usingItems')));}
+const displayFields=new Map();
+const cosmeticFields=['skinId','headItemId','frameId','titleId','profileFrameId','profileBgId','voiceVariant','cutinVariant'];
+const playerTypes=new Set(['DataModel.PlayerInfo','DataModel.ClientProfilePageOverview','MatchingResponse.ClientPlayerInfo',...['GB','HK','Jp','PMJ','Sc','TW'].map(x=>x+'GameResponse.'+x+'MaskedPlayer')]);
+function patchOwnPlayer(object){
+  if(!object||object.isNull())return false;
+  const fields=IL.fields(IL.api.objectClass(object)),names=new Set(fields.map(f=>f.name));
+  const idField=names.has('uid')?'uid':names.has('userId')?'userId':null;
+  if(!idField||IL.read(object,idField)!==uid)return false;
+  const source={uid};
+  for(const field of cosmeticFields)if(names.has(field))source[field]=IL.read(object,field);
+  if(names.has('usingItemId'))source.usingItemId=IL.ints(IL.read(object,'usingItemId'));
+  if(names.has('usingItems')){
+    const items=IL.read(object,'usingItems');source.usingItems=items.isNull()?{}:quiet(()=>IL.json(items));
   }
-  Object.values(value).forEach(ownDisplay);
+  const value=policy.playerDisplay(source,uid);
+  for(const field of cosmeticFields)if(field in value)IL.write(object,field,value[field]);
+  if('usingItemId' in value){
+    const response=quiet(()=>IL.fromJson('ApplyItemSetResponse',{usingItemId:value.usingItemId}));
+    IL.write(object,'usingItemId',IL.read(response,'usingItemId'));
+  }
+  if('usingItems' in value)IL.write(object,'usingItems',quiet(()=>IL.fromJson('DataModel.PlayerUsingItems',value.usingItems)));
+  return true;
+}
+function patchDisplay(object){
+  const klass=IL.api.objectClass(object),type=IL.typeName(IL.api.classType(klass));
+  if(playerTypes.has(type))return patchOwnPlayer(object)?1:0;
+  let fields=displayFields.get(type);
+  if(!fields){
+    fields=IL.fields(klass).filter(f=>!(f.flags&16)&&(playerTypes.has(f.type)||[...playerTypes].some(t=>f.type==='System.Collections.Generic.List<'+t+'>')||/^(GB|HK|Jp|PMJ|Sc|TW)GameResponse\.\w+GameStart$/.test(f.type)));
+    displayFields.set(type,fields);
+  }
+  let count=0;
+  for(const field of fields){
+    const value=IL.read(object,field.name);if(!value||value.isNull())continue;
+    if(field.type.startsWith('System.Collections.Generic.List<'))for(const player of IL.list(value))count+=patchOwnPlayer(player)?1:0;
+    else count+=patchDisplay(value);
+  }
+  return count;
 }
 function watchResponses(){
-  const addresses=new Set();
   const eligible=new Set(['InventoryResponse','ApplyItemSetResponse','ItemSetResponse','StickerSetResponse','LobbySetResponse']);
-  const displays=new Set(['ProfileResponse','JoinRoomResponse','SyncRoomResponse','MatchStartResponse','JoinDeskResponse','ReconnectResponse','ReconnectInfoResponse']);
-  for(const method of IL.methods(IL.klass('Newtonsoft.Json.JsonConvert'))){
-    if(method.name!=='DeserializeObject'||method.params[0]!=='System.String'||method.params[1]!=='System.Type'||addresses.has(method.address.toString()))continue;
-    addresses.add(method.address.toString());
-    hooks.push(Interceptor.attach(method.address,{onLeave(result){
-      if(suppress||result.isNull())return;
-      try{
-        const name=IL.api.name(IL.api.objectClass(result)).readUtf8String();
-        const job=scopes.get(Process.getCurrentThreadId());
-        if(!eligible.has(name)&&!displays.has(name)&&!(name==='RewardResponse'&&job?.operation==='CharacterGetOwnedSkin'))return;
-        state();let data=quiet(()=>IL.json(result));
-        if(name==='RewardResponse')data.itemList=catalog.skins.filter(x=>x.characterId===job.args[0]).map(x=>({itemId:x.skinId,count:1,type:7}));
-        else if(eligible.has(name)){
-          if(name==='InventoryResponse' && !['InventoryGetByType','InventoryGetByIds','InventoryGetList'].includes(job?.operation))return;
-          const context=job?.operation==='InventoryGetByType'?{itemType:job.args[0]}:job?.operation==='InventoryGetByIds'?{itemIds:job.args[0]}:{};
-          data=policy.overlay(name,data,context);
-        }
-        else ownDisplay(data);
-        const type=IL.typeName(IL.api.classType(IL.api.objectClass(result)));
-        result.replace(quiet(()=>IL.fromJson(type,data)));stats.responses++;
-      }catch(error){notify(error,'response');}
+  const method=IL.method('Newtonsoft.Json.Serialization.JsonSerializerInternalReader','Deserialize',3);
+  hooks.push(Interceptor.attach(method.address,{onLeave(result){
+    if(suppress||result.isNull())return;
+    try{
+      const klass=IL.api.objectClass(result),name=IL.api.name(klass).readUtf8String();
+      const job=scopes.get(Process.getCurrentThreadId());
+      state();
+      if(!eligible.has(name)&&!(name==='RewardResponse'&&job?.operation==='CharacterGetOwnedSkin')){
+        if(patchDisplay(result)){stats.responses++;stats.responseTypes[name]=(stats.responseTypes[name]||0)+1;}
+        return;
+      }
+      let data=quiet(()=>IL.json(result));
+      if(name==='RewardResponse')data.itemList=catalog.skins.filter(x=>x.characterId===job.args[0]).map(x=>({itemId:x.skinId,count:1,type:7}));
+      else if(eligible.has(name)){
+        if(name==='InventoryResponse' && !['InventoryGetByType','InventoryGetByIds','InventoryGetList'].includes(job?.operation))return;
+        const context=job?.operation==='InventoryGetByType'?{itemType:job.args[0]}:job?.operation==='InventoryGetByIds'?{itemIds:job.args[0]}:{};
+        data=policy.overlay(name,data,context);
+      }
+      const type=IL.typeName(IL.api.classType(klass));
+      result.replace(quiet(()=>IL.fromJson(type,data)));stats.responses++;
+      stats.responseTypes[name]=(stats.responseTypes[name]||0)+1;
+    }catch(error){notify(error,'response');}
+  }}));
+}
+function watchViews(){
+  function record(name){stats.views[name]=(stats.views[name]||0)+1;}
+  function inventoryArgument(args,configIndex,rowIndex){
+    const config=args[configIndex];if(config.isNull())return;
+    const id=IL.read(config,'id');if(!policy.types.has(id))return;
+    const old=args[rowIndex].isNull()?{}:quiet(()=>IL.json(args[rowIndex]));
+    const row=quiet(()=>IL.fromJson('DataModel.ClientInventoryItem',policy.inventoryRow(id,old)));
+    args[rowIndex]=row;
+  }
+  for(const [type,name,count,configIndex,rowIndex] of [
+    ['InventoryItem','InitWearItem',4,1,2],['InventoryItem','InitEmoji',4,1,2],
+    ['InventoryItem','InitCharacterSkinItem',5,2,3],['InventoryItemDetails','UpdateItem',2,1,2]
+  ]){
+    const method=IL.method(type,name,count);
+    hooks.push(Interceptor.attach(method.address,{onEnter(args){
+      if(suppress)return;
+      try{state();inventoryArgument(args,configIndex,rowIndex);record(type+'.'+name);}catch(error){notify(error,'inventory-view');}
     }}));
   }
+  for(const [type,names] of [
+    ['InventoryPage',['UpdateNoSubNavPage','UpdateSubNavPage','UpdateEmojiPage']],
+    ['InventoryCustomPage',['UpdateInventoryList']]
+  ])for(const name of names){
+    const method=IL.methods(IL.klass(type)).find(m=>m.name===name);if(!method)throw Error('Missing cosmetic view: '+name);
+    hooks.push(Interceptor.attach(method.address,{onEnter(args){
+      if(suppress)return;
+      try{
+        state();const itemType=IL.read(args[0],'curType');
+        if(!catalog.items.some(x=>x.type===itemType))return;
+        const current=IL.read(args[0],'tempInventoryList');
+        const existing=current.isNull()?[]:IL.list(current).map(x=>quiet(()=>IL.json(x)));
+        const response=quiet(()=>IL.fromJson('InventoryResponse',{itemList:policy.inventory(existing,{itemType})}));
+        IL.write(args[0],'tempInventoryList',IL.read(response,'itemList'));record(type+'.'+name);
+      }catch(error){notify(error,'inventory-cache');}
+    }}));
+  }
+  const players=IL.method('JapaneseMahjong.PlayerInfoMgr','Init',1);
+  hooks.push(Interceptor.attach(players.address,{onEnter(args){
+    if(suppress||args[1].isNull())return;
+    try{state();for(const player of IL.list(args[1]))if(patchOwnPlayer(player))record('PlayerInfoMgr.Init');}
+    catch(error){notify(error,'match-view');}
+  }}));
+  const room=IL.method('RoomPlayerItem','UpdateUI',3);
+  hooks.push(Interceptor.attach(room.address,{onEnter(args){
+    if(suppress||args[1].isNull())return;
+    try{
+      state();if(patchOwnPlayer(args[1]))record('RoomPlayerItem.UpdateUI');
+    }catch(error){notify(error,'room-view');}
+  }}));
 }
 function unlockInfo(info){
   if(!info||info.isNull())return info;
@@ -171,7 +246,7 @@ rpc.exports={
     const methods=IL.methods(IL.klass('NetworkMgr'));let count=0;
     for(const m of methods)if(localOperations.has(m.name)||readOperations.has(m.name)){watchFactory(m);count++;}
     if(count!==localOperations.size+readOperations.size)throw Error('Client API changed; refusing partial installation');
-    watchResponses();watchPreviews();return {active:true,operations:localOperations.size,categories:new Set(catalog.items.map(x=>x.type)).size};
+    watchResponses();watchViews();watchPreviews();return {active:true,operations:localOperations.size,categories:new Set(catalog.items.map(x=>x.type)).size};
   });},
   verify(){return IL.attached(()=>({references:verifyReferences()}));},
   status(){return {...stats,active:hooks.length>0};},

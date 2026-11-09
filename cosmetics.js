@@ -3,6 +3,7 @@ if(typeof structuredClone==='undefined')globalThis.structuredClone=v=>JSON.parse
 class AmatsukiPolicy {
   constructor(catalog, preferences = {}, seed = {}) {
     this.catalog = catalog;
+    this.items = new Map(catalog.items.map(x => [x.itemId, x]));
     this.types = new Map(catalog.items.map(x => [x.itemId, x.type]));
     this.roles = new Map(catalog.characters.map(x => [x.characterId, x]));
     this.skins = new Map(catalog.skins.map(x => [x.skinId, x.characterId]));
@@ -43,10 +44,38 @@ class AmatsukiPolicy {
       return v;
     });
   }
+  inventoryRow(id, existing={}) {
+    const item=this.items.get(id);
+    if(!item)return structuredClone(existing);
+    return {lastGainTime:0,...existing,...item,count:Math.max(1,existing.count||0),isUsing:this.using().includes(id)};
+  }
   inventory(existing=[], context={}) {
-    const rows=new Map(existing.map(x=>[x.itemId,x])); const used=new Set(this.using());
-    for(const item of this.catalog.items) rows.set(item.itemId,{lastGainTime:0,...rows.get(item.itemId),...item,count:Math.max(1,rows.get(item.itemId)?.count||0),isUsing:used.has(item.itemId)});
+    const rows=new Map(existing.map(x=>[x.itemId,x]));
+    for(const item of this.catalog.items)rows.set(item.itemId,this.inventoryRow(item.itemId,rows.get(item.itemId)));
     return [...rows.values()].filter(x=>context.itemType!==undefined?x.type===context.itemType:context.itemIds?context.itemIds.includes(x.itemId):true);
+  }
+  playerDisplay(original, uid) {
+    const value=structuredClone(original),using=this.using();
+    const selected=new Map(using.map(id=>[this.types.get(id),id]));
+    const fields={8:'frameId',9:'titleId',12:'riichiStickItemId',13:'mjFrontItemId',14:'mjBackItemId',15:'handItemId',16:'ronEffectItemId',17:'riichiEffectItemId',19:'matchMusicItemId',20:'riichiMusicItemId',21:'tableEffectItemId',22:'tableItemId',26:'profileFrameId',27:'profileBgId'};
+    const visit=v=>{
+      if(!v||typeof v!=='object')return;
+      if(String(v.uid)===String(uid)) {
+        if('usingItemId' in v)v.usingItemId=[...using];
+        if('skinId' in v&&selected.has(7))v.skinId=selected.get(7);
+        if('headItemId' in v&&selected.has(6)&&[6,7].includes(this.types.get(v.headItemId)))v.headItemId=selected.get(6);
+        for(const [type,field] of Object.entries(fields))if(field in v&&selected.has(Number(type)))v[field]=selected.get(Number(type));
+        if(v.usingItems) {
+          for(const [type,field] of Object.entries(fields))if(selected.has(Number(type)))v.usingItems[field]=selected.get(Number(type));
+          if(this.state.emoji)v.usingItems.emojiItemIdList=[...this.state.emoji];
+        }
+        const role=selected.get(6);
+        if('voiceVariant' in v&&role in this.state.voices)v.voiceVariant=this.state.voices[role];
+        if('cutinVariant' in v&&role in this.state.cutins)v.cutinVariant=this.state.cutins[role];
+      }
+      Object.values(v).forEach(visit);
+    };
+    visit(value);return value;
   }
   merge(base, local, deleted=[]) {
     const map=new Map(base.filter(x=>!deleted.includes(x.setIndex)).map(x=>[x.setIndex,structuredClone(x)]));
@@ -97,7 +126,7 @@ class AmatsukiPolicy {
     } else if(name==='InventorySaveCurrentItemSet') {
       const index=this.slot(a);this.state.groups[index]={setIndex:index,name:String(b).slice(0,80),itemId:this.using(),stickerSetIndex:0,enableRandom:!!c};
     } else if(name==='InventoryApplyCustomGroup') {
-      const group=this.merge(this.baseGroups,this.state.groups).find(x=>x.setIndex===this.slot(a));if(!group)throw Error('套组不存在');group.itemId.forEach(x=>this.equip(x));
+      const group=this.merge(this.baseGroups,this.state.groups).find(x=>x.setIndex===this.slot(a));if(!group)throw Error('套组不存在');group.itemId.forEach(x=>this.equip(x));this.followLobby();
     } else if(name==='InventorySwitchCustomGroupRandom') this.state.randomGroups=!!a;
     else if(name==='InventorySaveEmojiGroup') {
       const index=this.slot(a);if(!Array.isArray(b)||b.some(x=>this.types.get(x)!==23))throw Error('表情套组包含无效内容');

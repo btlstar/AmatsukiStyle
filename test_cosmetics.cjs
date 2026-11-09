@@ -31,3 +31,21 @@ test('equipped emoji list is preserved across unrelated changes',()=>{const c=st
 
 test('inventory pages receive only their requested cosmetic category',()=>{const p=new Policy(catalog,{},seed);const rows=p.overlay('InventoryResponse',{status:0,itemList:[]},{itemType:15}).itemList;assert.equal(rows.length,2);assert.ok(rows.every(x=>x.type===15));});
 test('switching character updates the lobby set and selected skin',()=>{const p=new Policy(catalog,{}, {...seed,lobbySetItem:{setIndex:0,name:'大厅',lobbyBgItemId:1100000,lobbyBgmItemId:1180000,lobbyCharacterSkinId:1070100,scale:1,locationX:0,locationY:0}});p.operation('CharacterSetUsing',[1060002]);assert.equal(p.applyResponse().lobbySetItem.lobbyCharacterSkinId,1070200);});
+
+
+test('cached cosmetic rows stay owned and follow local selection',()=>{
+ const p=new Policy(catalog,{},seed);p.equip(1152000);
+ assert.equal(p.inventoryRow(1152000,{itemId:1152000,count:0,isUsing:false}).count,1);
+ assert.equal(p.inventoryRow(1152000,{itemId:1152000,count:0,isUsing:false}).isUsing,true);
+ assert.equal(p.inventoryRow(1150000,{itemId:1150000,count:1,isUsing:true}).isUsing,false);
+ const gift={itemId:1010000,count:0,isUsing:false};assert.deepEqual(p.inventoryRow(1010000,gift),gift);
+});
+test('room and match overlays change only own cosmetics',()=>{
+ const p=new Policy(catalog,{},seed);p.equip(1070103);p.equip(1152000);
+ const own={uid:'1234567890123456789',skinId:1070100,headItemId:1060001,usingItems:{handItemId:1150000},rankExp:123,favorabilityLevel:3};
+ const other={...structuredClone(own),uid:'2234567890123456789'};
+ const value=p.playerDisplay({players:[own,other]},own.uid);
+ assert.equal(value.players[0].skinId,1070103);assert.equal(value.players[0].usingItems.handItemId,1152000);
+ assert.equal(value.players[0].rankExp,123);assert.equal(value.players[0].favorabilityLevel,3);
+ assert.deepEqual(value.players[1],other);assert.equal(own.skinId,1070100);
+});
