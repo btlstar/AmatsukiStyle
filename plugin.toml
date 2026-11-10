@@ -1,6 +1,6 @@
 id = "amatsukistyle"
 name = "AmatsukiStyle"
-version = "0.1.0-dev.1"
+version = "0.1.0"
 platform = "Amatsuki"
-entry = "host.py"
+entry = "gui.py"
 license = "Apache-2.0"

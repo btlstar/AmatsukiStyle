@@ -228,6 +228,42 @@ function unlockInfo(info){
   if(![2,3,4,5,6].includes(kind))return info;
   return quiet(()=>IL.fromJson('DataModel.UnlockInfo',{lockType:0,level:0}));
 }
+function restoreLocalAppearance(){
+  const user=IL.staticRead('Gvar','userInfo');
+  if(!user||user.isNull()||String(IL.read(user,'uid'))==='0')return false;
+  synchronize(state(),policy.applyResponse());return true;
+}
+function watchLobby(){
+  let pending=true;
+  for(const [type,names] of [
+    ['LobbyMgr',['Start','UpdateUsingItems','UpdateUsingLobbySet']],
+    ['HomePage',['Start','UpdateCharacter','UpdateLobbyBg']]
+  ])for(const name of names){
+    const method=IL.method(type,name,0);
+    hooks.push(Interceptor.attach(method.address,{onEnter(){
+      if(suppress)return;
+      try{restoreLocalAppearance();if(type==='LobbyMgr'&&name==='Start')pending=true;}
+      catch(error){notify(error,'lobby-restore');}
+    }}));
+  }
+  const currentScene=IL.method('AppMgr','GetCurrentScene',0);
+  const update=IL.method('AppMgr','Update',0);
+  hooks.push(Interceptor.attach(update.address,{onEnter(args){
+    if(!pending||suppress)return;
+    try{
+      const scene=IL.string(IL.invoke(currentScene,args[0]));
+      const main=IL.staticRead('AppMgr','MAIN_SCENE');
+      if(!scene||scene!==main)return;
+      const lobby=IL.staticRead('LobbyMgr','_instance');if(!lobby||lobby.isNull())return;
+      const home=IL.read(lobby,'homePage');if(!home||home.isNull()||!restoreLocalAppearance())return;
+      pending=false;
+      IL.invoke(IL.method('LobbyMgr','UpdateUsingLobbySet',0),lobby);
+      IL.invoke(IL.method('LobbyMgr','UpdateUsingItems',0),lobby);
+      stats.views['login-restore']=(stats.views['login-restore']||0)+1;
+      send({event:'lobby-restored'});
+    }catch(error){pending=false;notify(error,'lobby-initial-refresh');}
+  }}));
+}
 function watchPreviews(){
   const getter=IL.method('VoiceUnlockConfig','GetClipByKey',1);
   hooks.push(Interceptor.attach(getter.address,{onLeave(result){try{if(!result.isNull())result.replace(unlockInfo(result));}catch(error){notify(error,'voice');}}}));
@@ -243,11 +279,14 @@ function watchPreviews(){
 }
 rpc.exports={
   configure(data,preferences){return IL.attached(()=>{
-    if(hooks.length)throw Error('Plugin is already active');catalog=data;profiles=preferences;verifyReferences();state();
+    if(hooks.length)throw Error('Plugin is already active');
+    const user=IL.staticRead('Gvar','userInfo');
+    if(!user||user.isNull()||!IL.read(user,'uid')||String(IL.read(user,'uid'))==='0')return {active:false,waiting:true};
+    catalog=data;profiles=preferences;verifyReferences();state();
     const methods=IL.methods(IL.klass('NetworkMgr'));let count=0;
     for(const m of methods)if(localOperations.has(m.name)||readOperations.has(m.name)){watchFactory(m);count++;}
     if(count!==localOperations.size+readOperations.size)throw Error('Client API changed; refusing partial installation');
-    watchResponses();watchViews();watchPreviews();return {active:true,operations:localOperations.size,categories:new Set(catalog.items.map(x=>x.type)).size};
+    watchResponses();watchViews();watchPreviews();watchLobby();return {active:true,operations:localOperations.size,categories:new Set(catalog.items.map(x=>x.type)).size};
   });},
   verify(){return IL.attached(()=>({references:verifyReferences()}));},
   status(){return {...stats,active:hooks.length>0};},
