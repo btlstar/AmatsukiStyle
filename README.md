@@ -2,7 +2,7 @@
 
 天月麻雀 Windows 客户端的独立本地装扮插件，提供游戏目录选择、启用 / 停止连接与游戏启动窗口。首版 **0.1.0** 以预发布版提供。
 
-从 [Releases](https://github.com/btlstar/AmatsukiStyle/releases/tag/v0.1.0) 下载 `AmatsukiStyle-0.1.0-windows-x64.zip`，完整解压后运行 `AmatsukiStyle.exe`。随包包含 Python 和依赖，无需代理或证书。
+从 [Releases](https://github.com/btlstar/AmatsukiStyle/releases/tag/v0.1.0) 下载 `AmatsukiStyle-0.1.0-windows-x64.zip`，完整解压后运行 `AmatsukiStyle.exe`。随包包含运行依赖，无需另外安装 Python 或 Node.js，也无需代理或证书。
 
 ## 使用
 
