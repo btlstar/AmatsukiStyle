@@ -47,12 +47,12 @@ def main():
         command += ["--collect-all", module]
     command += [str(ROOT / "gui.py")]
     subprocess.run(command, cwd=ROOT, check=True)
-    shutil.copytree(ROOT / "build/frozen/AmatsukiStyle", stage)
+    shutil.copytree(ROOT / "build/frozen/AmatsukiStyle", stage, ignore=shutil.ignore_patterns("tests", "test", "__pycache__", "*.pyc"))
     for file in ["README.md", "LICENSE.txt", "NOTICE"]:
         shutil.copy2(ROOT / file, stage / file)
     licenses(stage / "LICENSES")
     files = {str(p.relative_to(stage)).replace("\\", "/"): digest(p) for p in sorted(stage.rglob("*")) if p.is_file()}
-    assert not any(Path(p).parts[0] in {".local", ".venv", "game", "logs", "originals", "staged"} for p in files)
+    assert not any(set(Path(p).parts) & {".local", ".venv", "game", "logs", "originals", "staged", "tests", "test"} for p in files)
     private_notes = {"COMMIT_MESSAGE.md", "VALIDATION.md", "RELEASE_NOTES.md", "AMATSUKI_FEASIBILITY.md"}
     assert not any(Path(p).name in private_notes or set(Path(p).parts) & {"docs", "notes", "research"} for p in files)
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
